@@ -1,0 +1,280 @@
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دفتر حساباتي</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;padding:18px;background:#f4f1e9;color:#292d32;
+  font-family:Arial,sans-serif
+}
+.container{max-width:600px;margin:auto}
+h1{margin-bottom:5px}
+.sub{color:#777;margin-top:0}
+.card{
+  background:white;padding:18px;border-radius:16px;
+  margin:16px 0;box-shadow:0 3px 12px #0000000c
+}
+label{display:block;margin:14px 0 6px;font-size:14px}
+input,textarea{
+  width:100%;padding:12px;border:1px solid #ddd;
+  border-radius:10px;font-size:16px;background:#fff
+}
+button{
+  padding:12px;border:0;border-radius:10px;
+  cursor:pointer;font-size:15px
+}
+.primary{background:#276749;color:white;width:100%;margin-top:16px}
+.summary{background:#e0eee4}
+.total{font-size:27px;font-weight:bold;color:#276749;margin-top:8px}
+.entry{border:1px solid #e5e5e5;padding:14px;border-radius:12px;margin-top:12px}
+.entry h3{margin:0 0 10px}
+.entry p{margin:7px 0;color:#555;overflow-wrap:anywhere}
+.actions{display:flex;gap:8px;margin-top:12px}
+.actions button{flex:1}
+.edit{background:#e8eefc}
+.delete{background:#fae5e5;color:#9b2525}
+.empty{text-align:center;color:#888;padding:18px}
+.small{font-size:12px;color:#777;line-height:1.7}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>📒 دفتر حساباتي</h1>
+  <p class="sub">سجّل فلوسك وأيامك واحتفظ بحساباتك</p>
+
+  <div class="card summary">
+    <div>إجمالي المبالغ المسجلة</div>
+    <div class="total" id="total">0 جنيه</div>
+    <div id="count">عدد السجلات: 0</div>
+  </div>
+
+  <div class="card">
+    <h3 id="formTitle">➕ إضافة سجل جديد</h3>
+    <form id="recordForm">
+      <label for="name">اسم الشخص</label>
+      <input id="name" required placeholder="اكتب الاسم">
+
+      <label for="amount">المبلغ بالجنيه</label>
+      <input id="amount" type="number" min="0" step="0.01"
+      required placeholder="مثلاً 500">
+
+      <label for="day">اليوم أو التاريخ</label>
+      <input id="day" type="date" required>
+
+      <label for="note">ملاحظات</label>
+      <textarea id="note" rows="3" placeholder="سبب المبلغ أو تفاصيل اليوم"></textarea>
+
+      <button class="primary" id="saveBtn" type="submit">💾 حفظ السجل</button>
+      <button type="button" id="cancelBtn" style="display:none;margin-top:10px;width:100%">إلغاء التعديل</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3>📚 السجلات المحفوظة</h3>
+    <input id="search" placeholder="ابحث بالاسم..." style="margin-bottom:12px">
+    <div id="records"></div>
+  </div>
+
+  <p class="small">
+    بياناتك محفوظة على هذا المتصفح فقط. لا تمسح بيانات الموقع أو المتصفح
+    قبل تصدير نسخة احتياطية، لأن ذلك قد يؤدي لفقدان السجلات.
+  </p>
+  <button class="primary" id="exportBtn">📥 تنزيل نسخة احتياطية</button>
+  <button id="importBtn" style="width:100%;margin-top:10px;background:#e4e7ec">📤 استرجاع نسخة احتياطية</button>
+  <input id="fileInput" type="file" accept=".json,application/json" hidden>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const KEY = "daftar-hesabati-v1";
+let records = [];
+let editingId = null;
+
+try {
+  const saved = localStorage.getItem(KEY);
+  records = saved ? JSON.parse(saved) : [];
+  if (!Array.isArray(records)) records = [];
+} catch {
+  records = [];
+}
+
+function persist() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(records));
+    return true;
+  } catch {
+    alert("تعذر الحفظ. صدّر نسخة احتياطية وتأكد من مساحة المتصفح.");
+    return false;
+  }
+}
+
+function money(n) {
+  return Number(n).toLocaleString("ar-EG", {
+    maximumFractionDigits: 2
+  }) + " جنيه";
+}
+
+function safe(text) {
+  return String(text ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;",
+    '"':"&quot;", "'":"&#39;"
+  }[c]));
+}
+
+function render() {
+  const q = $("search").value.trim().toLowerCase();
+  const shown = records.filter(r => r.name.toLowerCase().includes(q));
+
+  $("total").textContent = money(records.reduce((sum,r) => sum + r.amount, 0));
+  $("count").textContent = "عدد السجلات: " + records.length;
+
+  if (!shown.length) {
+    $("records").innerHTML = '<div class="empty">مفيش سجلات هنا لسه</div>';
+    return;
+  }
+
+  $("records").innerHTML = shown.map(r => `
+    <div class="entry">
+      <h3>${safe(r.name)}</h3>
+      <p>💰 المبلغ: <b>${money(r.amount)}</b></p>
+      <p>📅 التاريخ: ${safe(r.day)}</p>
+      ${r.note ? `<p>📝 ${safe(r.note)}</p>` : ""}
+      <div class="actions">
+        <button class="edit" data-edit="${safe(r.id)}">تعديل</button>
+        <button class="delete" data-delete="${safe(r.id)}">حذف</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+$("recordForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const name = $("name").value.trim();
+  const amount = Number($("amount").value);
+  const day = $("day").value;
+
+  if (!name || !day || $("amount").value === "" ||
+      !Number.isFinite(amount) || amount < 0) {
+    alert("راجع الاسم والمبلغ والتاريخ");
+    return;
+  }
+
+  const previous = editingId
+    ? records.find(r => r.id === editingId)
+    : null;
+
+  const record = {
+    id: editingId || (Date.now().toString() + Math.random().toString(16).slice(2)),
+    name,
+    amount,
+    day,
+    note: $("note").value.trim(),
+    createdAt: previous?.createdAt || new Date().toISOString()
+  };
+
+  const oldRecords = [...records];
+
+  if (editingId) {
+    records = records.map(r => r.id === editingId ? record : r);
+  } else {
+    records.unshift(record);
+  }
+
+  if (!persist()) {
+    records = oldRecords;
+    return;
+  }
+
+  $("recordForm").reset();
+  $("day").value = new Date().toLocaleDateString("en-CA");
+  editingId = null;
+  $("formTitle").textContent = "➕ إضافة سجل جديد";
+  $("saveBtn").textContent = "💾 حفظ السجل";
+  $("cancelBtn").style.display = "none";
+  render();
+});
+
+$("records").addEventListener("click", e => {
+  const editId = e.target.dataset.edit;
+  const deleteId = e.target.dataset.delete;
+
+  if (editId) {
+    const r = records.find(x => x.id === editId);
+    if (!r) return;
+    editingId = r.id;
+    $("name").value = r.name;
+    $("amount").value = r.amount;
+    $("day").value = r.day;
+    $("note").value = r.note;
+    $("formTitle").textContent = "✏️ تعديل السجل";
+    $("saveBtn").textContent = "حفظ التعديلات";
+    $("cancelBtn").style.display = "block";
+    window.scrollTo({top:0,behavior:"smooth"});
+  }
+
+  if (deleteId) {
+    if (!confirm("متأكد إنك عايز تحذف السجل ده؟")) return;
+    const oldRecords = [...records];
+    records = records.filter(r => r.id !== deleteId);
+    if (!persist()) records = oldRecords;
+    render();
+  }
+});
+
+$("cancelBtn").addEventListener("click", () => {
+  editingId = null;
+  $("recordForm").reset();
+  $("day").value = new Date().toLocaleDateString("en-CA");
+  $("formTitle").textContent = "➕ إضافة سجل جديد";
+  $("saveBtn").textContent = "💾 حفظ السجل";
+  $("cancelBtn").style.display = "none";
+});
+
+$("search").addEventListener("input", render);
+
+$("exportBtn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify(records, null, 2)], {
+    type:"application/json"
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "daftar-hesabati-backup.json";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+$("importBtn").addEventListener("click", () => $("fileInput").click());
+
+$("fileInput").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (!Array.isArray(data) || !data.every(r =>
+      r && typeof r.name === "string" &&
+      typeof r.amount === "number" && Number.isFinite(r.amount) &&
+      r.amount >= 0 && typeof r.day === "string" &&
+      typeof r.note === "string" && typeof r.id === "string"
+    )) throw new Error();
+    if (!confirm("استرجاع النسخة هيستبدل السجلات الحالية. تكمل؟")) return;
+    const oldRecords = records;
+    records = data;
+    if (!persist()) records = oldRecords;
+    render();
+  } catch {
+    alert("ملف النسخة الاحتياطية غير صالح");
+  } finally {
+    e.target.value = "";
+  }
+});
+
+$("day").value = new Date().toLocaleDateString("en-CA");
+render();
+</script>
+</body>
+</html>
